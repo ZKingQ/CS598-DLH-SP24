@@ -30,7 +30,7 @@
     "ae_oact": false,
     "act": "relu",
     "dims": "50",
-    "max_epochs": 2000,
+    "max_epochs": 20,
     "patience": 20
   },
   "AE": {
