@@ -3,7 +3,7 @@
     "data": "abundance_Cirrhosis",
     "custom_data": null,
     "custom_data_labels": null,
-    "data_dir": "/content/drive/My Drive/Colab Notebooks/data/abundance/",
+    "data_dir": "data/abundance/",
     "dataType": "float64"
   },
   "exp_design": {
