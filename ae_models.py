@@ -92,7 +92,8 @@ class VAE(nn.Module):
         h = torch.tanh(self.encoder1(x))
         return self.mu(h), torch.sqrt(torch.exp(self.log_sigma2(h)))
 
-    def sampling(self, mu, std):  # Reparameterization trick
+    @staticmethod
+    def sampling(mu, std):  # Re parameterization trick
         eps = torch.randn_like(std)
         return mu + eps * std
 

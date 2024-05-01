@@ -1,13 +1,11 @@
 import numpy as np
 import pandas as pd
 import time
-import json
 import datetime
 import math
-
+import os
 import matplotlib
 import matplotlib.pyplot as plt
-
 from sklearn.model_selection import train_test_split
 from sklearn.neural_network import MLPClassifier
 from sklearn.decomposition import PCA
@@ -21,11 +19,9 @@ from sklearn.metrics import accuracy_score
 from sklearn.metrics import precision_score
 from sklearn.metrics import recall_score
 from sklearn.metrics import f1_score
-
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import torchvision
+from torch.utils.data import DataLoader, TensorDataset
+from ae_models import AutoEncoder, CAE, VAE
 
 matplotlib.use('agg')
 seed = 42
@@ -46,7 +42,7 @@ label_dict = {
 }
 
 
-def loadData(data_dir, filename, dtype=None):
+def load_data(data_dir, filename, dtype=None):
     feature_string = ''
     if filename.split('_')[0] == 'abundance':
         feature_string = "k__"
@@ -74,64 +70,84 @@ def loadData(data_dir, filename, dtype=None):
     return X_train, X_test, y_train, y_test
 
 
-data_dir = '../data/marker/'
-data_string = 'marker_Cirrhosis.txt'
-X_train, X_test, y_train, y_test = loadData(data_dir, data_string, dtype='float32')
+def train_vae(model, train_loader, test_loader, device):
+    model = model.to(device)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
+    rec_loss, kl_loss = [], []
+    for epoch in range(epoch_num):
 
-trainloader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(torch.tensor(X_train), torch.tensor(y_train)),
-                                          batch_size=32, shuffle=True)
-testloader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(torch.tensor(X_test), torch.tensor(y_test)),
-                                         batch_size=32, shuffle=False)
+        """ model training """
+        model.train()
+        cur_rec_loss, cur_kl_loss = [], []
+        for batch_idx, (data, _) in enumerate(train_loader):
+            data = data.to(device)
+            rec, mu, std = model(data)
+            loss, err, kl = model.loss_func(rec, data.reshape(-1, model.input_dim), mu, std)
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            cur_rec_loss.append(err.item())
+            cur_kl_loss.append(kl.item())
+
+        rec_loss.append(np.mean(cur_rec_loss))
+        kl_loss.append(np.mean(cur_kl_loss))
+
+        """ model evaluation """
+        with torch.no_grad():
+            test_loss = []
+            for batch_idx, (data, _) in enumerate(test_loader):
+                data = data.to(device)
+                rec, mu, std = model(data)
+                _, mse, _ = model.loss_func(rec, data.reshape(data.shape[0], -1), mu, std)
+                test_loss.append(mse.item())
+
+        if epoch % 10 == 0:
+            print(
+                f"-- epoch {epoch} --, train MSE: {np.mean(cur_rec_loss)}, train KL: {np.mean(cur_kl_loss)}, test MSE: {np.mean(test_loss)}")
+    return model
 
 
+def train_ae(model, train_loader, test_loader, device):
+    optimizer = torch.optim.AdamW(model.parameters(), lr=0.002)
 
+    losses = []
+    for epoch in range(epoch_num):
 
-
-optimizer = torch.optim.AdamW(model.parameters(), lr=0.002)
-
-losses = []
-for epoch in range(200):
-
-    """ model training """
-    model.train()
-    cur_rec_loss = []
-    for batch_idx, (data, _) in enumerate(trainloader):
-        data = data.to(device)
-        rec = model(data)
-        loss = model.loss_func(rec, data.reshape(data.shape[0], -1))
-
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
-        cur_rec_loss.append(loss.item())
-    losses.append(np.mean(cur_rec_loss))
-
-    """ model evaluation """
-    with torch.no_grad():
-        test_loss = []
-        for batch_idx, (data, _) in enumerate(testloader):
+        """ model training """
+        model.train()
+        cur_rec_loss = []
+        for batch_idx, (data, _) in enumerate(train_loader):
             data = data.to(device)
             rec = model(data)
             loss = model.loss_func(rec, data)
-            test_loss.append(loss.item())
 
-    if epoch % 10 == 0:
-        print(f"-- epoch {epoch} --, train MSE: {np.mean(cur_rec_loss)}, test MSE: {np.mean(test_loss)}")
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
 
-model = AutoEncoder(input_dim=X_train.shape[1]).to(device)
+            cur_rec_loss.append(loss.item())
+        losses.append(np.mean(cur_rec_loss))
 
-X_train = torch.tensor(X_train).to(device)
-X_test = torch.tensor(X_test).to(device)
+        """ model evaluation """
+        with torch.no_grad():
+            test_loss = []
+            for batch_idx, (data, _) in enumerate(test_loader):
+                data = data.to(device)
+                rec = model(data)
+                loss = model.loss_func(rec, data)
+                test_loss.append(loss.item())
 
-X_train_encoded = model.encoder(X_train).cpu().detach().numpy()
-X_test_encoded = model.encoder(X_test).cpu().detach().numpy()
+        if epoch % 10 == 0:
+            print(f"-- epoch {epoch} --, train MSE: {np.mean(cur_rec_loss)}, test MSE: {np.mean(test_loss)}")
+
+    return model
 
 
-def get_metrics(clf, is_svm=False):
+def get_metrics(clf, X_test_encoded, y_test):
     y_true, y_pred = y_test, clf.predict(X_test_encoded)
-    y_prob = 0
-    y_prob = clf.predict_proba(X_test_encoded)
+    y_prob = clf.predict_proba(X_test_encoded)[:, 1]
     # Performance Metrics: AUC, ACC, Recall, Precision, F1_score
     metrics = {
         'AUC': roc_auc_score(y_true, y_prob),
@@ -143,16 +159,106 @@ def get_metrics(clf, is_svm=False):
     return metrics
 
 
-# SVM
+# Classification by using the transformed data
+def classification(model, X_train, y_train, X_test, y_test, device, is_vae=False):
+    model = model.to(device)
+    # check if X_train is tensor already
+    if not torch.is_tensor(X_train):
+        X_train = torch.tensor(X_train).to(device)
+        X_test = torch.tensor(X_test).to(device)
 
-clf = SVC(kernel='linear', probability=True, random_state=seed)
-clf.fit(X_train_encoded, y_train)
-print(get_metrics(clf, is_svm=True))
-# Random Forest
-clf = RandomForestClassifier(n_estimators=100)
-clf.fit(X_train_encoded, y_train)
-print(get_metrics(clf))
-# Multi-layer Perceptron
-clf = MLPClassifier(hidden_layer_sizes=(100, 100), max_iter=1000)
-clf.fit(X_train_encoded, y_train)
-print(get_metrics(clf))
+    if is_vae:
+        X_train_encoded = model.encoder(X_train)[0].cpu().detach().numpy()
+        X_test_encoded = model.encoder(X_test)[0].cpu().detach().numpy()
+    else:
+        X_train_encoded = model.encoder(X_train).cpu().detach().numpy()
+        X_test_encoded = model.encoder(X_test).cpu().detach().numpy()
+    X_train_encoded = np.reshape(X_train_encoded, (X_train_encoded.shape[0], -1))
+    X_test_encoded = np.reshape(X_test_encoded, (X_test_encoded.shape[0], -1))
+
+    # SVM
+    clf = SVC(kernel='linear', probability=True)
+    clf.fit(X_train_encoded, y_train)
+    metrics = get_metrics(clf, X_test_encoded, y_test)
+    metrics['model'] = 'SVM'
+    print(metrics)
+    # Random Forest
+    clf = RandomForestClassifier(n_estimators=100)
+    clf.fit(X_train_encoded, y_train)
+    metrics = get_metrics(clf, X_test_encoded, y_test)
+    metrics['model'] = 'Random Forest'
+    print(metrics)
+    # Multi-layer Perceptron
+    clf = MLPClassifier(hidden_layer_sizes=(100, 100), max_iter=1000)
+    clf.fit(X_train_encoded, y_train)
+    metrics = get_metrics(clf, X_test_encoded, y_test)
+    metrics['model'] = 'MLP'
+    print(metrics)
+    # TODO: store training time and classification time
+    # TODO: add GridSearchCV to find out best params
+
+
+def run_ae_experiment(X_train, X_test, y_train, y_test, train_loader, test_loader, device):
+    model = AutoEncoder(input_dim=X_train.shape[1]).to(device)
+    model = train_ae(model, train_loader, test_loader, device)
+    classification(model, X_train, y_train, X_test, y_test, device)
+
+
+def run_cae_experiment(X_train, X_test, y_train, y_test, device):
+    # one_side_dim = int(math.sqrt(X_train.shape[1])) + 1
+    one_side_dim = 348
+    enlarged_dim = one_side_dim ** 2
+    X_train = np.column_stack((X_train, np.zeros((X_train.shape[0], enlarged_dim - X_train.shape[1]))))
+    X_test = np.column_stack((X_test, np.zeros((X_test.shape[0], enlarged_dim - X_test.shape[1]))))
+    # reshape
+    X_train = np.reshape(X_train, (len(X_train), one_side_dim, one_side_dim, 1))
+    X_test = np.reshape(X_test, (len(X_test), one_side_dim, one_side_dim, 1))
+    # to float32
+    X_train = X_train.astype('float32')
+    X_test = X_test.astype('float32')
+    X_train = torch.tensor(X_train).to(device)
+    X_test = torch.tensor(X_test).to(device)
+    X_train = X_train.transpose(1, 3)
+    X_test = X_test.transpose(1, 3)
+    train_loader = DataLoader(TensorDataset(torch.tensor(X_train), torch.tensor(y_train)), batch_size=32, shuffle=True)
+    test_loader = DataLoader(TensorDataset(torch.tensor(X_test), torch.tensor(y_test)), batch_size=32, shuffle=False)
+    model = CAE().to(device)
+    model = train_ae(model, train_loader, test_loader, device)
+    classification(model, X_train, y_train, X_test, y_test, device)
+
+
+def run_vae_experiment(X_train, X_test, y_train, y_test, train_loader, test_loader, device):
+    model = VAE(input_dim=X_train.shape[1]).to(device)
+    model = train_vae(model, train_loader, test_loader, device)
+    classification(model, X_train, y_train, X_test, y_test, device, is_vae=True)
+
+
+def run_experiment_on_data(data_dir, data_string):
+    X_train, X_test, y_train, y_test = load_data(data_dir, data_string, dtype='float32')
+    train_loader = DataLoader(
+        TensorDataset(torch.tensor(X_train), torch.tensor(y_train)),
+        batch_size=32, shuffle=True)
+    test_loader = DataLoader(TensorDataset(torch.tensor(X_test), torch.tensor(y_test)),
+                             batch_size=32, shuffle=False)
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    if torch.backends.mps.is_available():
+        device = torch.device("mps")
+
+    run_ae_experiment(X_train, X_test, y_train, y_test, train_loader, test_loader, device)
+    run_cae_experiment(X_train, X_test, y_train, y_test, device)
+    run_vae_experiment(X_train, X_test, y_train, y_test, train_loader, test_loader, device)
+    # TODO: add pca and rp experiment
+
+
+def run_experiment():
+    data_dir = './data/marker/'
+    # run_experiment_on_data(data_dir, "marker_Cirrhosis.txt")
+    data_list = os.listdir(data_dir)
+    for data_string in data_list:
+        print("Running experiment on data: ", data_string)
+        run_experiment_on_data(data_dir, data_string)
+
+
+epoch_num = 1
+
+run_experiment()
