@@ -207,7 +207,7 @@ def run_sub_classification(method, X_train_encoded, y_train, X_test_encoded, y_t
                                 verbose=1)
     clf.fit(X_train_encoded, y_train)
     metrics = get_metrics(clf, X_test_encoded, y_test)
-    metrics['model'] = method
+    metrics['classification_method'] = method
     print(metrics)
     print("Best hyper-parameters: ", clf.best_params_)
     metrics['hyper_parameters'] = clf.best_params_
