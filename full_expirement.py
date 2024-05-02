@@ -159,8 +159,7 @@ def get_metrics(clf, X_test_encoded, y_test):
     return metrics
 
 
-# Classification by using the transformed data
-def classification(model, X_train, y_train, X_test, y_test, device, is_vae=False):
+def classification_with_pytorch_model(model, X_train, y_train, X_test, y_test, device, is_vae=False):
     model = model.to(device)
     # check if X_train is tensor already
     if not torch.is_tensor(X_train):
@@ -175,7 +174,11 @@ def classification(model, X_train, y_train, X_test, y_test, device, is_vae=False
         X_test_encoded = model.encoder(X_test).cpu().detach().numpy()
     X_train_encoded = np.reshape(X_train_encoded, (X_train_encoded.shape[0], -1))
     X_test_encoded = np.reshape(X_test_encoded, (X_test_encoded.shape[0], -1))
+    classification(X_train_encoded, y_train, X_test_encoded, y_test)
 
+
+# Classification by using the transformed data
+def classification(X_train_encoded, y_train, X_test_encoded, y_test):
     # SVM
     clf = SVC(kernel='linear', probability=True)
     clf.fit(X_train_encoded, y_train)
@@ -201,7 +204,7 @@ def classification(model, X_train, y_train, X_test, y_test, device, is_vae=False
 def run_ae_experiment(X_train, X_test, y_train, y_test, train_loader, test_loader, device):
     model = AutoEncoder(input_dim=X_train.shape[1]).to(device)
     model = train_ae(model, train_loader, test_loader, device)
-    classification(model, X_train, y_train, X_test, y_test, device)
+    classification_with_pytorch_model(model, X_train, y_train, X_test, y_test, device)
 
 
 def run_cae_experiment(X_train, X_test, y_train, y_test, device):
@@ -224,13 +227,33 @@ def run_cae_experiment(X_train, X_test, y_train, y_test, device):
     test_loader = DataLoader(TensorDataset(torch.tensor(X_test), torch.tensor(y_test)), batch_size=32, shuffle=False)
     model = CAE().to(device)
     model = train_ae(model, train_loader, test_loader, device)
-    classification(model, X_train, y_train, X_test, y_test, device)
+    classification_with_pytorch_model(model, X_train, y_train, X_test, y_test, device)
 
 
 def run_vae_experiment(X_train, X_test, y_train, y_test, train_loader, test_loader, device):
     model = VAE(input_dim=X_train.shape[1]).to(device)
     model = train_vae(model, train_loader, test_loader, device)
-    classification(model, X_train, y_train, X_test, y_test, device, is_vae=True)
+    classification_with_pytorch_model(model, X_train, y_train, X_test, y_test, device, is_vae=True)
+
+
+def run_pca_experiment(X_train, X_test, y_train, y_test):
+    pca = PCA(n_components=10)
+    pca.fit(X_train)
+    X_train_pca = pca.transform(X_train)
+    X_test_pca = pca.transform(X_test)
+    classification(X_train_pca, y_train, X_test_pca, y_test)
+
+
+def run_rp_experiment(X_train, X_test, y_train, y_test):
+    rp = GaussianRandomProjection(eps=0.5)
+    rp.fit(X_train)
+    X_train_rp = rp.transform(X_train)
+    X_test_rp = rp.transform(X_test)
+    classification(X_train_rp, y_train, X_test_rp, y_test)
+
+
+def run_plain_experiment(X_train, X_test, y_train, y_test):
+    classification(X_train, y_train, X_test, y_test)
 
 
 def run_experiment_on_data(data_dir, data_string):
@@ -247,7 +270,9 @@ def run_experiment_on_data(data_dir, data_string):
     run_ae_experiment(X_train, X_test, y_train, y_test, train_loader, test_loader, device)
     run_cae_experiment(X_train, X_test, y_train, y_test, device)
     run_vae_experiment(X_train, X_test, y_train, y_test, train_loader, test_loader, device)
-    # TODO: add pca and rp experiment
+    run_pca_experiment(X_train, X_test, y_train, y_test)
+    run_rp_experiment(X_train, X_test, y_train, y_test)
+    run_plain_experiment(X_train, X_test, y_train, y_test)
 
 
 def run_experiment():
