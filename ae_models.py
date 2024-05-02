@@ -1,7 +1,28 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torchvision
+
+
+class ShallowAutoEncoder(nn.Module):
+    def __init__(self, input_dim=28 * 28):
+        super(ShallowAutoEncoder, self).__init__()
+        self.input_dim = input_dim
+        self.encoder1 = nn.Linear(input_dim, 16)
+        self.decoder1 = nn.Linear(16, input_dim)
+
+    def encoder(self, x):
+        return torch.tanh(self.encoder1(x))
+
+    def decoder(self, z):
+        return torch.sigmoid(self.decoder1(z))
+
+    def forward(self, x):
+        z = self.encoder(x.view(-1, self.input_dim))
+        return self.decoder(z)
+
+    @staticmethod
+    def loss_func(x_hat, x):
+        return F.mse_loss(x_hat, x, reduction='sum')
 
 
 class AutoEncoder(nn.Module):
