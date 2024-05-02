@@ -21,7 +21,7 @@ from sklearn.metrics import recall_score
 from sklearn.metrics import f1_score
 import torch
 from torch.utils.data import DataLoader, TensorDataset
-from ae_models import AutoEncoder, CAE, VAE
+from ae_models import AutoEncoder, CAE, VAE, ShallowAutoEncoder
 
 matplotlib.use('agg')
 seed = 42
@@ -74,7 +74,7 @@ def train_vae(model, train_loader, test_loader, device):
     model = model.to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
     rec_loss, kl_loss = [], []
-    for epoch in range(epoch_num):
+    for epoch in range(1, epoch_num + 1):
 
         """ model training """
         model.train()
@@ -103,17 +103,18 @@ def train_vae(model, train_loader, test_loader, device):
                 _, mse, _ = model.loss_func(rec, data.reshape(data.shape[0], -1), mu, std)
                 test_loss.append(mse.item())
 
-        if epoch % 10 == 0:
+        if epoch == 1 or epoch % 10 == 0:
             print(
                 f"-- epoch {epoch} --, train MSE: {np.mean(cur_rec_loss)}, train KL: {np.mean(cur_kl_loss)}, test MSE: {np.mean(test_loss)}")
     return model
 
 
 def train_ae(model, train_loader, test_loader, device):
+    # TODO: cache the model
     optimizer = torch.optim.AdamW(model.parameters(), lr=0.002)
 
     losses = []
-    for epoch in range(epoch_num):
+    for epoch in range(1, epoch_num + 1):
 
         """ model training """
         model.train()
@@ -139,7 +140,7 @@ def train_ae(model, train_loader, test_loader, device):
                 loss = model.loss_func(rec, data)
                 test_loss.append(loss.item())
 
-        if epoch % 10 == 0:
+        if epoch == 1 or epoch % 10 == 0:
             print(f"-- epoch {epoch} --, train MSE: {np.mean(cur_rec_loss)}, test MSE: {np.mean(test_loss)}")
 
     return model
@@ -174,37 +175,70 @@ def classification_with_pytorch_model(model, X_train, y_train, X_test, y_test, d
         X_test_encoded = model.encoder(X_test).cpu().detach().numpy()
     X_train_encoded = np.reshape(X_train_encoded, (X_train_encoded.shape[0], -1))
     X_test_encoded = np.reshape(X_test_encoded, (X_test_encoded.shape[0], -1))
-    classification(X_train_encoded, y_train, X_test_encoded, y_test)
+    return classification(X_train_encoded, y_train, X_test_encoded, y_test)
+
+
+def run_sub_classification(method, X_train_encoded, y_train, X_test_encoded, y_test):
+    clf = ""
+    hyper_parameters = {}
+    # hyper-parameter grids for classifiers
+    rf_hyper_parameters = [{'n_estimators': [s for s in range(100, 1001, 200)],
+                            'max_features': ['sqrt', 'log2'],
+                            'min_samples_leaf': [1, 2, 3, 4, 5],
+                            'criterion': ['gini', 'entropy']
+                            }, ]
+    svm_hyper_parameters = [{'C': [2 ** s for s in range(-5, 6, 2)], 'kernel': ['linear']},
+                            {'C': [2 ** s for s in range(-5, 6, 2)], 'gamma': [2 ** s for s in range(3, -15, -2)],
+                             'kernel': ['rbf']}]
+    mlp_hyper_parameters = [{'hidden_layer_sizes': [(64, 64), (128, 128), (256, 256), (512, 512)],
+                             'alpha': [2 ** s for s in range(-15, 1, 2)]}]
+
+    if method == 'SVM':
+        clf = SVC(kernel='linear', probability=True)
+        hyper_parameters = svm_hyper_parameters
+    elif method == 'Random Forest':
+        clf = RandomForestClassifier(n_estimators=100)
+        hyper_parameters = rf_hyper_parameters
+    elif method == 'MLP':
+        clf = MLPClassifier(hidden_layer_sizes=(64, 64), max_iter=1000)
+        hyper_parameters = mlp_hyper_parameters
+    clf = GridSearchCV(clf, param_grid=hyper_parameters,
+                                cv=StratifiedKFold(n_splits=5, shuffle=True), scoring='roc_auc',
+                                verbose=1)
+    clf.fit(X_train_encoded, y_train)
+    metrics = get_metrics(clf, X_test_encoded, y_test)
+    metrics['model'] = method
+    print(metrics)
+    print("Best hyper-parameters: ", clf.best_params_)
+    metrics['hyper_parameters'] = clf.best_params_
+    return metrics
 
 
 # Classification by using the transformed data
 def classification(X_train_encoded, y_train, X_test_encoded, y_test):
-    # SVM
-    clf = SVC(kernel='linear', probability=True)
-    clf.fit(X_train_encoded, y_train)
-    metrics = get_metrics(clf, X_test_encoded, y_test)
-    metrics['model'] = 'SVM'
-    print(metrics)
-    # Random Forest
-    clf = RandomForestClassifier(n_estimators=100)
-    clf.fit(X_train_encoded, y_train)
-    metrics = get_metrics(clf, X_test_encoded, y_test)
-    metrics['model'] = 'Random Forest'
-    print(metrics)
-    # Multi-layer Perceptron
-    clf = MLPClassifier(hidden_layer_sizes=(100, 100), max_iter=1000)
-    clf.fit(X_train_encoded, y_train)
-    metrics = get_metrics(clf, X_test_encoded, y_test)
-    metrics['model'] = 'MLP'
-    print(metrics)
-    # TODO: store training time and classification time
-    # TODO: add GridSearchCV to find out best params
+    methods = ['MLP', 'SVM', 'Random Forest']
+    metrics_list = []
+    for method in methods:
+        classification_start_time = time.time()
+        metrics = run_sub_classification(method, X_train_encoded.copy(), y_train.copy(), X_test_encoded.copy(),
+                                         y_test.copy())
+        classification_end_time = time.time()
+        print(method, "Classification time: ", classification_end_time - classification_start_time)
+        metrics['classification_time'] = classification_end_time - classification_start_time
+        metrics_list.append(metrics)
+    return metrics_list
+
+
+def run_shallow_ae_experiment(X_train, X_test, y_train, y_test, train_loader, test_loader, device):
+    model = ShallowAutoEncoder(input_dim=X_train.shape[1]).to(device)
+    model = train_ae(model, train_loader, test_loader, device)
+    return classification_with_pytorch_model(model, X_train, y_train, X_test, y_test, device)
 
 
 def run_ae_experiment(X_train, X_test, y_train, y_test, train_loader, test_loader, device):
     model = AutoEncoder(input_dim=X_train.shape[1]).to(device)
     model = train_ae(model, train_loader, test_loader, device)
-    classification_with_pytorch_model(model, X_train, y_train, X_test, y_test, device)
+    return classification_with_pytorch_model(model, X_train, y_train, X_test, y_test, device)
 
 
 def run_cae_experiment(X_train, X_test, y_train, y_test, device):
@@ -227,13 +261,13 @@ def run_cae_experiment(X_train, X_test, y_train, y_test, device):
     test_loader = DataLoader(TensorDataset(torch.tensor(X_test), torch.tensor(y_test)), batch_size=32, shuffle=False)
     model = CAE().to(device)
     model = train_ae(model, train_loader, test_loader, device)
-    classification_with_pytorch_model(model, X_train, y_train, X_test, y_test, device)
+    return classification_with_pytorch_model(model, X_train, y_train, X_test, y_test, device)
 
 
 def run_vae_experiment(X_train, X_test, y_train, y_test, train_loader, test_loader, device):
     model = VAE(input_dim=X_train.shape[1]).to(device)
     model = train_vae(model, train_loader, test_loader, device)
-    classification_with_pytorch_model(model, X_train, y_train, X_test, y_test, device, is_vae=True)
+    return classification_with_pytorch_model(model, X_train, y_train, X_test, y_test, device, is_vae=True)
 
 
 def run_pca_experiment(X_train, X_test, y_train, y_test):
@@ -241,7 +275,7 @@ def run_pca_experiment(X_train, X_test, y_train, y_test):
     pca.fit(X_train)
     X_train_pca = pca.transform(X_train)
     X_test_pca = pca.transform(X_test)
-    classification(X_train_pca, y_train, X_test_pca, y_test)
+    return classification(X_train_pca, y_train, X_test_pca, y_test)
 
 
 def run_rp_experiment(X_train, X_test, y_train, y_test):
@@ -249,11 +283,30 @@ def run_rp_experiment(X_train, X_test, y_train, y_test):
     rp.fit(X_train)
     X_train_rp = rp.transform(X_train)
     X_test_rp = rp.transform(X_test)
-    classification(X_train_rp, y_train, X_test_rp, y_test)
+    return classification(X_train_rp, y_train, X_test_rp, y_test)
 
 
 def run_plain_experiment(X_train, X_test, y_train, y_test):
-    classification(X_train, y_train, X_test, y_test)
+    return classification(X_train, y_train, X_test, y_test)
+
+
+def run_sub_experiment_on_data(model_type, X_train, X_test, y_train, y_test, train_loader, test_loader, device):
+    metrics_list = []
+    if model_type == 'shallow_ae':
+        metrics_list = run_shallow_ae_experiment(X_train, X_test, y_train, y_test, train_loader, test_loader, device)
+    elif model_type == 'ae':
+        metrics_list = run_ae_experiment(X_train, X_test, y_train, y_test, train_loader, test_loader, device)
+    elif model_type == 'cae':
+        metrics_list = run_cae_experiment(X_train, X_test, y_train, y_test, device)
+    elif model_type == 'vae':
+        metrics_list = run_vae_experiment(X_train, X_test, y_train, y_test, train_loader, test_loader, device)
+    elif model_type == 'pca':
+        metrics_list = run_pca_experiment(X_train, X_test, y_train, y_test)
+    elif model_type == 'rp':
+        metrics_list = run_rp_experiment(X_train, X_test, y_train, y_test)
+    elif model_type == 'plain':
+        metrics_list = run_plain_experiment(X_train, X_test, y_train, y_test)
+    return metrics_list
 
 
 def run_experiment_on_data(data_dir, data_string):
@@ -267,23 +320,44 @@ def run_experiment_on_data(data_dir, data_string):
     if torch.backends.mps.is_available():
         device = torch.device("mps")
 
-    run_ae_experiment(X_train, X_test, y_train, y_test, train_loader, test_loader, device)
-    run_cae_experiment(X_train, X_test, y_train, y_test, device)
-    run_vae_experiment(X_train, X_test, y_train, y_test, train_loader, test_loader, device)
-    run_pca_experiment(X_train, X_test, y_train, y_test)
-    run_rp_experiment(X_train, X_test, y_train, y_test)
-    run_plain_experiment(X_train, X_test, y_train, y_test)
+    all_metrics_df_on_current_data = pd.DataFrame()
+    model_types = ['shallow_ae', 'ae', 'cae', 'vae', 'pca', 'rp', 'plain']
+    for model_type in model_types:
+        print("Running experiment on model: ", model_type)
+        experiment_start_time = time.time()
+        metrics_list = run_sub_experiment_on_data(model_type, X_train, X_test, y_train, y_test, train_loader,
+                                                  test_loader, device)
+        experiment_end_time = time.time()
+        print("Experiment time: ", experiment_end_time - experiment_start_time)
+
+        for metrics in metrics_list:
+            metrics['experiment_time'] = experiment_end_time - experiment_start_time
+            metrics['data'] = data_string
+            metrics['model'] = model_type
+            metrics['seed'] = seed
+            metrics['epoch_num'] = epoch_num
+            metrics['device'] = device
+            print(metrics)
+            # save metrics
+        metrics_df = pd.DataFrame(metrics_list)
+        all_metrics_df_on_current_data = pd.concat([all_metrics_df_on_current_data, metrics_df], ignore_index=True)
+    return all_metrics_df_on_current_data
 
 
 def run_experiment():
     data_dir = './data/marker/'
-    # run_experiment_on_data(data_dir, "marker_Cirrhosis.txt")
+    # main_metrics_df = run_experiment_on_data(data_dir, "marker_Cirrhosis.txt")
+    main_metrics_df = pd.DataFrame()
     data_list = os.listdir(data_dir)
     for data_string in data_list:
         print("Running experiment on data: ", data_string)
-        run_experiment_on_data(data_dir, data_string)
+        all_metrics_df_on_current_data = run_experiment_on_data(data_dir, data_string)
+        main_metrics_df = pd.concat([main_metrics_df, all_metrics_df_on_current_data], ignore_index=True)
+    csv_file_name = datetime.datetime.now().strftime("%Y%m%d-%H%M%S") + '_metrics.csv'
+    main_metrics_df.to_csv(csv_file_name, index=False)
+    print("Metrics saved to file: ", csv_file_name)
 
 
-epoch_num = 1
+epoch_num = 200
 
 run_experiment()
