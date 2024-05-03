@@ -204,7 +204,7 @@ def run_sub_classification(method, X_train_encoded, y_train, X_test_encoded, y_t
         hyper_parameters = mlp_hyper_parameters
     clf = GridSearchCV(clf, param_grid=hyper_parameters,
                                 cv=StratifiedKFold(n_splits=5, shuffle=True), scoring='roc_auc',
-                                verbose=1)
+                                verbose=1, n_jobs=-1)
     clf.fit(X_train_encoded, y_train)
     metrics = get_metrics(clf, X_test_encoded, y_test)
     metrics['classification_method'] = method
@@ -347,15 +347,17 @@ def run_experiment_on_data(data_dir, data_string):
 def run_experiment():
     data_dir = './data/marker/'
     # main_metrics_df = run_experiment_on_data(data_dir, "marker_Cirrhosis.txt")
-    main_metrics_df = pd.DataFrame()
     data_list = os.listdir(data_dir)
     for data_string in data_list:
+        if data_string == "marker_Cirrhosis.txt":
+            continue
+        main_metrics_df = pd.DataFrame()
         print("Running experiment on data: ", data_string)
         all_metrics_df_on_current_data = run_experiment_on_data(data_dir, data_string)
         main_metrics_df = pd.concat([main_metrics_df, all_metrics_df_on_current_data], ignore_index=True)
-    csv_file_name = datetime.datetime.now().strftime("%Y%m%d-%H%M%S") + '_metrics.csv'
-    main_metrics_df.to_csv(csv_file_name, index=False)
-    print("Metrics saved to file: ", csv_file_name)
+        csv_file_name = datetime.datetime.now().strftime("%Y%m%d-%H%M%S") + '_metrics.csv'
+        main_metrics_df.to_csv(csv_file_name, index=False)
+        print("Metrics saved to file: ", csv_file_name)
 
 
 epoch_num = 200
