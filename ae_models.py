@@ -7,8 +7,8 @@ class ShallowAutoEncoder(nn.Module):
     def __init__(self, input_dim=28 * 28):
         super(ShallowAutoEncoder, self).__init__()
         self.input_dim = input_dim
-        self.encoder1 = nn.Linear(input_dim, 16)
-        self.decoder1 = nn.Linear(16, input_dim)
+        self.encoder1 = nn.Linear(input_dim, 32)
+        self.decoder1 = nn.Linear(32, input_dim)
 
     def encoder(self, x):
         return torch.tanh(self.encoder1(x))
@@ -26,33 +26,30 @@ class ShallowAutoEncoder(nn.Module):
 
 
 class AutoEncoder(nn.Module):
-    def __init__(self, input_dim=28 * 28):
+    def __init__(self, input_dim=28*28):
         super(AutoEncoder, self).__init__()
         self.input_dim = input_dim
 
         # DNN as encoder
-        self.encoder1 = nn.Linear(input_dim, 128)
-        self.encoder2 = nn.Linear(128, 64)
-        self.encoder3 = nn.Linear(64, 32)
-        self.encoder4 = nn.Linear(32, 8)
+        # 512-256-128
+        self.encoder1 = nn.Linear(input_dim, 512)
+        self.encoder2 = nn.Linear(512, 256)
+        self.encoder3 = nn.Linear(256, 128)
 
         # DNN as decoder
-        self.decoder1 = nn.Linear(8, 32)
-        self.decoder2 = nn.Linear(32, 64)
-        self.decoder3 = nn.Linear(64, 128)
-        self.decoder4 = nn.Linear(128, input_dim)
+        self.decoder1 = nn.Linear(128, 256)
+        self.decoder2 = nn.Linear(256, 512)
+        self.decoder3 = nn.Linear(512, input_dim)
 
     def encoder(self, x):
         h = torch.tanh(self.encoder1(x))
         h = torch.tanh(self.encoder2(h))
-        h = torch.tanh(self.encoder3(h))
-        return torch.tanh(self.encoder4(h))
+        return torch.tanh(self.encoder3(h))
 
     def decoder(self, z):
         h = torch.tanh(self.decoder1(z))
         h = torch.tanh(self.decoder2(h))
-        h = torch.tanh(self.decoder3(h))
-        return torch.sigmoid(self.decoder4(h))
+        return torch.sigmoid(self.decoder3(h))
 
     def forward(self, x):
         z = self.encoder(x.view(-1, self.input_dim))
@@ -60,7 +57,7 @@ class AutoEncoder(nn.Module):
 
     @staticmethod
     def loss_func(x_hat, x):
-        return F.mse_loss(x_hat, x, reduction='sum')
+        return F.mse_loss(x_hat, x)
 
 
 class CAE(nn.Module):
