@@ -21,7 +21,7 @@ from sklearn.metrics import recall_score
 from sklearn.metrics import f1_score
 import torch
 from torch.utils.data import DataLoader, TensorDataset
-from ae_models import AutoEncoder, CAE, VAE, ShallowAutoEncoder
+from ae_models import AutoEncoder, CAE, VAE, ShallowAutoEncoder, EarlyStopper
 
 matplotlib.use('agg')
 seed = 42
@@ -74,7 +74,8 @@ def train_vae(model, train_loader, test_loader, device):
     model = model.to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
     rec_loss, kl_loss = [], []
-    for epoch in range(1, epoch_num + 1):
+    early_stopper = EarlyStopper(patience=5, delta=0.0)
+    for epoch in range(1, max_epoch_num + 1):
 
         """ model training """
         model.train()
@@ -102,6 +103,9 @@ def train_vae(model, train_loader, test_loader, device):
                 rec, mu, std = model(data)
                 _, mse, _ = model.loss_func(rec, data.reshape(data.shape[0], -1), mu, std)
                 test_loss.append(mse.item())
+            if early_stopper(np.mean(test_loss)):
+                print(f"Early stopping at epoch {epoch}")
+                break
 
         if epoch == 1 or epoch % 10 == 0:
             print(
@@ -110,11 +114,11 @@ def train_vae(model, train_loader, test_loader, device):
 
 
 def train_ae(model, train_loader, test_loader, device):
-    # TODO: cache the model
     optimizer = torch.optim.AdamW(model.parameters(), lr=0.002)
 
     losses = []
-    for epoch in range(1, epoch_num + 1):
+    early_stopper = EarlyStopper(patience=5, delta=0.0)
+    for epoch in range(1, max_epoch_num + 1):
 
         """ model training """
         model.train()
@@ -139,6 +143,9 @@ def train_ae(model, train_loader, test_loader, device):
                 rec = model(data)
                 loss = model.loss_func(rec, data)
                 test_loss.append(loss.item())
+            if early_stopper(np.mean(test_loss)):
+                print(f"Early stopping at epoch {epoch}")
+                break
 
         if epoch == 1 or epoch % 10 == 0:
             print(f"-- epoch {epoch} --, train MSE: {np.mean(cur_rec_loss)}, test MSE: {np.mean(test_loss)}")
@@ -204,7 +211,7 @@ def run_sub_classification(method, X_train_encoded, y_train, X_test_encoded, y_t
         hyper_parameters = mlp_hyper_parameters
     clf = GridSearchCV(clf, param_grid=hyper_parameters,
                                 cv=StratifiedKFold(n_splits=5, shuffle=True), scoring='roc_auc',
-                                verbose=1, n_jobs=-1)
+                                verbose=1, n_jobs=2)
     clf.fit(X_train_encoded, y_train)
     metrics = get_metrics(clf, X_test_encoded, y_test)
     metrics['classification_method'] = method
@@ -229,16 +236,30 @@ def classification(X_train_encoded, y_train, X_test_encoded, y_test):
     return metrics_list
 
 
+def run_model_training_and_classification(model_type, X_train, X_test, y_train, y_test, train_loader, test_loader, device):
+    path = './cached_model/' + global_data_identifier + '_' + model_type + '_model.pth'
+    if cache_trained_model and os.path.exists(path):
+        model = torch.load(model_type + '_model.pth')
+    else:
+        if model_type == 'vae':
+            model = train_vae(model, train_loader, test_loader, device)
+        else:
+            model = train_ae(model, train_loader, test_loader, device)
+        if cache_trained_model:
+            torch.save(model, path)
+    if train_only:
+        return []
+    return classification_with_pytorch_model(model, X_train, y_train, X_test, y_test, device)
+
+
 def run_shallow_ae_experiment(X_train, X_test, y_train, y_test, train_loader, test_loader, device):
     model = ShallowAutoEncoder(input_dim=X_train.shape[1]).to(device)
-    model = train_ae(model, train_loader, test_loader, device)
-    return classification_with_pytorch_model(model, X_train, y_train, X_test, y_test, device)
+    return run_model_training_and_classification('shallow_ae', model, X_train, X_test, y_train, y_test, train_loader, test_loader, device)
 
 
 def run_ae_experiment(X_train, X_test, y_train, y_test, train_loader, test_loader, device):
     model = AutoEncoder(input_dim=X_train.shape[1]).to(device)
-    model = train_ae(model, train_loader, test_loader, device)
-    return classification_with_pytorch_model(model, X_train, y_train, X_test, y_test, device)
+    return run_model_training_and_classification('ae', model, X_train, X_test, y_train, y_test, train_loader, test_loader, device)
 
 
 def run_cae_experiment(X_train, X_test, y_train, y_test, device):
@@ -260,17 +281,17 @@ def run_cae_experiment(X_train, X_test, y_train, y_test, device):
     train_loader = DataLoader(TensorDataset(torch.tensor(X_train), torch.tensor(y_train)), batch_size=32, shuffle=True)
     test_loader = DataLoader(TensorDataset(torch.tensor(X_test), torch.tensor(y_test)), batch_size=32, shuffle=False)
     model = CAE().to(device)
-    model = train_ae(model, train_loader, test_loader, device)
-    return classification_with_pytorch_model(model, X_train, y_train, X_test, y_test, device)
+    return run_model_training_and_classification('cae', model, X_train, y_train, X_test, y_test, train_loader, test_loader, device)
 
 
 def run_vae_experiment(X_train, X_test, y_train, y_test, train_loader, test_loader, device):
     model = VAE(input_dim=X_train.shape[1]).to(device)
-    model = train_vae(model, train_loader, test_loader, device)
-    return classification_with_pytorch_model(model, X_train, y_train, X_test, y_test, device, is_vae=True)
+    return run_model_training_and_classification('vae', model, X_train, y_train, X_test, y_test, train_loader, test_loader, device)
 
 
 def run_pca_experiment(X_train, X_test, y_train, y_test):
+    if train_only:
+        return []
     pca = PCA(n_components=10)
     pca.fit(X_train)
     X_train_pca = pca.transform(X_train)
@@ -279,6 +300,8 @@ def run_pca_experiment(X_train, X_test, y_train, y_test):
 
 
 def run_rp_experiment(X_train, X_test, y_train, y_test):
+    if train_only:
+        return []
     rp = GaussianRandomProjection(eps=0.5)
     rp.fit(X_train)
     X_train_rp = rp.transform(X_train)
@@ -287,6 +310,8 @@ def run_rp_experiment(X_train, X_test, y_train, y_test):
 
 
 def run_plain_experiment(X_train, X_test, y_train, y_test):
+    if train_only:
+        return []
     return classification(X_train, y_train, X_test, y_test)
 
 
@@ -329,13 +354,15 @@ def run_experiment_on_data(data_dir, data_string):
                                                   test_loader, device)
         experiment_end_time = time.time()
         print("Experiment time: ", experiment_end_time - experiment_start_time)
+        if train_only:
+            continue
 
         for metrics in metrics_list:
             metrics['experiment_time'] = experiment_end_time - experiment_start_time
             metrics['data'] = data_string
             metrics['model'] = model_type
             metrics['seed'] = seed
-            metrics['epoch_num'] = epoch_num
+            metrics['max_epoch_num'] = max_epoch_num
             metrics['device'] = device
             print(metrics)
             # save metrics
@@ -348,18 +375,25 @@ def run_experiment():
     data_dir = './data/marker/'
     # main_metrics_df = run_experiment_on_data(data_dir, "marker_Cirrhosis.txt")
     data_list = os.listdir(data_dir)
+    data_list.reverse()
     for data_string in data_list:
+        global_data_identifier = data_string.split('.')[0]
         if data_string == "marker_Cirrhosis.txt":
             continue
         main_metrics_df = pd.DataFrame()
         print("Running experiment on data: ", data_string)
         all_metrics_df_on_current_data = run_experiment_on_data(data_dir, data_string)
+        if train_only:
+            continue
         main_metrics_df = pd.concat([main_metrics_df, all_metrics_df_on_current_data], ignore_index=True)
         csv_file_name = datetime.datetime.now().strftime("%Y%m%d-%H%M%S") + '_metrics.csv'
         main_metrics_df.to_csv(csv_file_name, index=False)
         print("Metrics saved to file: ", csv_file_name)
 
 
-epoch_num = 200
+max_epoch_num = 2000
+train_only = False
+cache_trained_model = False
+global_data_identifier = ''
 
 run_experiment()
