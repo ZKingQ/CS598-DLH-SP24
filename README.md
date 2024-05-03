@@ -1,4 +1,7 @@
-# CS598-DLH-SP24
+# CS598 Deep Learning for Healthcare - Final Project - DeepMicro: Deep Representation Learning for Disease Prediction based on Microbiome Data
+
+This repository is the official implementation of [Oh, M., & Zhang, L. (2020). DeepMicro: deep representation learning for disease prediction based on microbiome data. Scientific reports, 10(1), 6026.](https://www.nature.com/articles/s41598-020-63159-5).
+
 
 ## Prerequisites
 
@@ -21,8 +24,17 @@ cd CS598-DLH-SP24
 pip install -r requirements.txt
 ```
 
-## Usage
-Follow the steps outlined in the DLH_Team_71_PyTorch.ipynb notebook to run the project. Make sure you have installed and downloaded all the required packages and datasets.
+## Training
+Follow the steps outlined in the DLH_Team_71_PyTorch.ipynb notebook to run the project in [Run Experiments](https://github.com/ZKingQ/CS598-DLH-SP24/blob/main/DLH_Team_71_PyTorch.ipynb/#run-experiments) section
+. Make sure you have installed and downloaded all the required packages and datasets.
+
+```python
+run_experiment()
+```
+
+## Evaluation
+
+The evaluation codes are embedded in the `classification` function and the evaluation metrics are saved in path `\result\`.
 
 ## Contributing
 Contributions are welcome!
