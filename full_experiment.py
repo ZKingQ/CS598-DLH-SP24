@@ -236,10 +236,11 @@ def classification(X_train_encoded, y_train, X_test_encoded, y_test):
     return metrics_list
 
 
-def run_model_training_and_classification(model_type, X_train, X_test, y_train, y_test, train_loader, test_loader, device):
+def run_model_training_and_classification(model_type, model, X_train, X_test, y_train, y_test, train_loader, test_loader, device):
     path = './cached_model/' + global_data_identifier + '_' + model_type + '_model.pth'
+    print("Checking model path: ", path)
     if cache_trained_model and os.path.exists(path):
-        model = torch.load(model_type + '_model.pth')
+        model = torch.load(path, map_location=device)
     else:
         if model_type == 'vae':
             model = train_vae(model, train_loader, test_loader, device)
@@ -377,8 +378,9 @@ def run_experiment():
     data_list = os.listdir(data_dir)
     data_list.reverse()
     for data_string in data_list:
+        global global_data_identifier
         global_data_identifier = data_string.split('.')[0]
-        if data_string == "marker_Cirrhosis.txt":
+        if data_string == 'marker_Cirrhosis.txt' or data_string == 'marker_Colorectal.txt' or data_string == 'marker_IBD.txt':
             continue
         main_metrics_df = pd.DataFrame()
         print("Running experiment on data: ", data_string)
@@ -393,7 +395,7 @@ def run_experiment():
 
 max_epoch_num = 2000
 train_only = False
-cache_trained_model = False
+cache_trained_model = True
 global_data_identifier = ''
 
 run_experiment()
