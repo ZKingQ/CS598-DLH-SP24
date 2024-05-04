@@ -282,12 +282,12 @@ def run_cae_experiment(X_train, X_test, y_train, y_test, device):
     train_loader = DataLoader(TensorDataset(torch.tensor(X_train), torch.tensor(y_train)), batch_size=32, shuffle=True)
     test_loader = DataLoader(TensorDataset(torch.tensor(X_test), torch.tensor(y_test)), batch_size=32, shuffle=False)
     model = CAE().to(device)
-    return run_model_training_and_classification('cae', model, X_train, y_train, X_test, y_test, train_loader, test_loader, device)
+    return run_model_training_and_classification('cae', model, X_train, X_test, y_train, y_test, train_loader, test_loader, device)
 
 
 def run_vae_experiment(X_train, X_test, y_train, y_test, train_loader, test_loader, device):
     model = VAE(input_dim=X_train.shape[1]).to(device)
-    return run_model_training_and_classification('vae', model, X_train, y_train, X_test, y_test, train_loader, test_loader, device)
+    return run_model_training_and_classification('vae', model, X_train, X_test, y_train, y_test, train_loader, test_loader, device)
 
 
 def run_pca_experiment(X_train, X_test, y_train, y_test):
@@ -347,7 +347,7 @@ def run_experiment_on_data(data_dir, data_string):
         device = torch.device("mps")
 
     all_metrics_df_on_current_data = pd.DataFrame()
-    model_types = ['shallow_ae', 'ae', 'cae', 'vae', 'pca', 'rp', 'plain']
+    model_types = ['cae', 'shallow_ae', 'ae', 'vae', 'pca', 'rp', 'plain']
     for model_type in model_types:
         print("Running experiment on model: ", model_type)
         experiment_start_time = time.time()
@@ -376,7 +376,6 @@ def run_experiment():
     data_dir = './data/marker/'
     # main_metrics_df = run_experiment_on_data(data_dir, "marker_Cirrhosis.txt")
     data_list = os.listdir(data_dir)
-    data_list.reverse()
     for data_string in data_list:
         global global_data_identifier
         global_data_identifier = data_string.split('.')[0]
