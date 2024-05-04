@@ -250,7 +250,7 @@ def run_model_training_and_classification(model_type, model, X_train, X_test, y_
             torch.save(model, path)
     if train_only:
         return []
-    return classification_with_pytorch_model(model, X_train, y_train, X_test, y_test, device)
+    return classification_with_pytorch_model(model, X_train, y_train, X_test, y_test, device, is_vae=(model_type == 'vae'))
 
 
 def run_shallow_ae_experiment(X_train, X_test, y_train, y_test, train_loader, test_loader, device):
