@@ -1,6 +1,6 @@
 # CS598 Deep Learning for Healthcare - Final Project - DeepMicro: Deep Representation Learning for Disease Prediction based on Microbiome Data
 
-This repository is the official implementation of [Oh, M., & Zhang, L. (2020). DeepMicro: deep representation learning for disease prediction based on microbiome data. Scientific reports, 10(1), 6026.](https://www.nature.com/articles/s41598-020-63159-5).
+This repository implements [Oh, M., & Zhang, L. (2020). DeepMicro: deep representation learning for disease prediction based on microbiome data. Scientific reports, 10(1), 6026.](https://www.nature.com/articles/s41598-020-63159-5).
 
 
 ## Prerequisites
